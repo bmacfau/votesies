@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Votesies – Results</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <h1>Votesies</h1>
+    <p id="header-session"></p>
+  </header>
+  <main>
+    <div class="card">
+      <h2>Final Results</h2>
+      <p class="hint" id="results-hint"></p>
+      <ol id="results-list" class="results-list"></ol>
+    </div>
+    <div class="center" style="margin-top:1.5rem">
+      <a href="/" class="btn-primary" style="width:auto; display:inline-block">Play Again</a>
+    </div>
+  </main>
+
+  <script>
+    const code = new URLSearchParams(window.location.search).get('code') || '';
+    document.getElementById('header-session').textContent = code ? `Session ${code}` : '';
+
+    const medals = ['🥇', '🥈', '🥉'];
+
+    async function loadResults() {
+      const res = await fetch(`/api/session/${code}`);
+      const el = document.getElementById('results-list');
+
+      if (!res.ok) {
+        el.innerHTML = '<li style="color:var(--error)">Session not found.</li>';
+        return;
+      }
+
+      const session = await res.json();
+      if (!session.results || session.results.length === 0) {
+        el.innerHTML = '<li>Results are not available yet.</li>';
+        return;
+      }
+
+      const isApproval = session.votingMode === 'approval';
+      document.getElementById('results-hint').textContent = isApproval
+        ? 'Approval voting — score = number of players who approved each game.'
+        : 'Borda count — higher points = more preferred by the group.';
+      const scoreLabel = isApproval ? 'approval' : 'pts';
+
+      el.innerHTML = session.results.map((game, i) => `
+        <li class="result-item ${i < 3 ? 'top-' + (i + 1) : ''}">
+          <span class="result-rank">${medals[i] !== undefined ? medals[i] : i + 1 + '.'}</span>
+          <span class="result-name">${game.name}</span>
+          <span class="result-score">${game.score} ${scoreLabel}</span>
+        </li>
+      `).join('');
+    }
+
+    loadResults();
+  </script>
+</body>
+</html>

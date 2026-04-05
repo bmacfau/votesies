@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Votesies – Vote</title>
+  <link rel="stylesheet" href="style.css">
+  <style>
+    .game-info { display: flex; flex-direction: column; gap: .15rem; flex: 1; }
+    .game-tags { display: flex; gap: .35rem; flex-wrap: wrap; }
+    .tag {
+      font-size: .72rem; font-weight: 600; padding: .1rem .45rem;
+      border-radius: 99px; background: white; border: 1px solid var(--border);
+      color: var(--muted); white-space: nowrap;
+    }
+
+    .approval-list { display: flex; flex-direction: column; gap: .4rem; margin: .75rem 0; }
+    .approval-item {
+      display: flex; align-items: center; gap: .75rem; padding: .6rem .75rem;
+      background: var(--bg); border-radius: 8px; cursor: pointer;
+      border: 2px solid transparent; transition: background .15s, border-color .15s;
+      user-select: none;
+    }
+    .approval-item.approved { background: #e8f5e9; border-color: var(--primary); }
+    .approve-check {
+      width: 24px; height: 24px; border-radius: 50%; border: 2px solid var(--border);
+      display: flex; align-items: center; justify-content: center;
+      font-size: .8rem; flex-shrink: 0; transition: background .15s, border-color .15s;
+    }
+    .approval-item.approved .approve-check {
+      background: var(--primary); border-color: var(--primary); color: white;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Votesies</h1>
+    <p id="header-session"></p>
+  </header>
+  <main>
+
+    <!-- No playerId: show join form -->
+    <div id="join-view" class="card" style="display:none">
+      <h2>Join Session</h2>
+      <p>Enter your name to join.</p>
+      <form id="join-form">
+        <label for="join-name-input">Your name</label>
+        <input type="text" id="join-name-input" placeholder="Enter your name" required maxlength="30" autocomplete="off">
+        <button type="submit" class="btn-primary">Join</button>
+      </form>
+      <p id="join-error" class="error"></p>
+    </div>
+
+    <!-- Waiting in lobby -->
+    <div id="lobby-view" class="card" style="display:none">
+      <h2>Waiting for the host to start...</h2>
+      <p>The host will select a game list and kick things off.</p>
+      <h3 style="margin-top:1rem; font-size:1rem">Players</h3>
+      <ul id="lobby-player-list" class="player-list"></ul>
+    </div>
+
+    <!-- Voting -->
+    <div id="voting-view" style="display:none">
+      <div class="card">
+        <h2 id="voting-title"></h2>
+        <p class="hint" id="voting-hint"></p>
+        <ul id="ranking-list" class="ranking-list" style="display:none"></ul>
+        <div id="approval-list" class="approval-list" style="display:none"></div>
+        <button id="submit-btn" class="btn-primary" onclick="submitVote()">Submit</button>
+        <p id="vote-error" class="error"></p>
+      </div>
+    </div>
+
+    <!-- Submitted: waiting for others -->
+    <div id="waiting-view" class="card center" style="display:none">
+      <h2>Votes submitted!</h2>
+      <p>Waiting for everyone else to finish...</p>
+      <div class="spinner"></div>
+      <p id="vote-progress" style="color:var(--muted); font-size:.9rem"></p>
+    </div>
+
+  </main>
+
+  <script>
+    const params = new URLSearchParams(window.location.search);
+    const code = params.get('code') || '';
+    let playerId = sessionStorage.getItem(`playerId_${code}`);
+    let pollInterval;
+    let hasVoted = false;
+    let gamesRendered = false;
+
+    document.getElementById('header-session').textContent = code ? `Session ${code}` : '';
+
+    function showOnly(id) {
+      ['join-view', 'lobby-view', 'voting-view', 'waiting-view'].forEach(v => {
+        document.getElementById(v).style.display = v === id ? 'block' : 'none';
+      });
+    }
+
+    // ── Join form (when arriving via invite link with no sessionStorage entry) ──
+    document.getElementById('join-form').addEventListener('submit', async e => {
+      e.preventDefault();
+      const name = document.getElementById('join-name-input').value.trim();
+      const errEl = document.getElementById('join-error');
+      errEl.textContent = '';
+      try {
+        const res = await fetch(`/api/session/${code}/join`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error);
+        playerId = data.playerId;
+        sessionStorage.setItem(`playerId_${code}`, playerId);
+        startPolling();
+      } catch (err) {
+        errEl.textContent = err.message;
+      }
+    });
+
+    // ── Polling ──
+    async function poll() {
+      const res = await fetch(`/api/session/${code}`);
+      if (!res.ok) {
+        showOnly('join-view');
+        document.getElementById('join-error').textContent = 'Session not found.';
+        clearInterval(pollInterval);
+        return;
+      }
+      const session = await res.json();
+
+      if (session.status === 'lobby') {
+        renderLobby(session);
+      } else if (session.status === 'voting') {
+        if (hasVoted) {
+          renderWaiting(session);
+        } else {
+          renderVoting(session);
+        }
+      } else if (session.status === 'results') {
+        clearInterval(pollInterval);
+        window.location.href = `/results.html?code=${code}`;
+      }
+    }
+
+    function renderLobby(session) {
+      showOnly('lobby-view');
+      const ul = document.getElementById('lobby-player-list');
+      ul.innerHTML = session.players.map(p =>
+        `<li class="${p.isHost ? 'host' : ''}">${p.isHost ? '👑 ' : ''}${p.name}</li>`
+      ).join('');
+    }
+
+    function complexityLabel(c) {
+      if (c < 2.0) return 'Light';
+      if (c < 3.0) return 'Medium';
+      if (c < 4.0) return 'Heavy';
+      return 'Expert';
+    }
+
+    function gameTags(game) {
+      return `
+        ${game.genre      ? `<span class="tag">${game.genre}</span>` : ''}
+        ${game.length     ? `<span class="tag">⏱ ${game.length}</span>` : ''}
+        ${game.rating     ? `<span class="tag">⭐ ${game.rating}</span>` : ''}
+        ${game.complexity ? `<span class="tag">🧠 ${complexityLabel(game.complexity)}</span>` : ''}
+      `;
+    }
+
+    function renderVoting(session) {
+      if (gamesRendered) { showOnly('voting-view'); return; }
+      gamesRendered = true;
+      showOnly('voting-view');
+
+      if (session.votingMode === 'approval') {
+        renderApprovalVoting(session);
+      } else {
+        renderRankedVoting(session);
+      }
+    }
+
+    function renderRankedVoting(session) {
+      document.getElementById('voting-title').textContent = 'Rank these games';
+      document.getElementById('voting-hint').textContent = 'Drag to reorder — #1 is the game you most want to play tonight.';
+      document.getElementById('submit-btn').textContent = 'Submit My Rankings';
+
+      const list = document.getElementById('ranking-list');
+      list.style.display = '';
+      list.innerHTML = '';
+      session.games.forEach((game, i) => {
+        const li = document.createElement('li');
+        li.draggable = true;
+        li.dataset.id = game.id;
+        li.innerHTML = `
+          <span class="rank-num">${i + 1}</span>
+          <span class="drag-handle">⠿</span>
+          <div class="game-info">
+            <span class="game-name">${game.name}</span>
+            <div class="game-tags">${gameTags(game)}</div>
+          </div>
+        `;
+        list.appendChild(li);
+      });
+      initDragDrop(list);
+    }
+
+    function renderApprovalVoting(session) {
+      document.getElementById('voting-title').textContent = 'Approve your games';
+      document.getElementById('voting-hint').textContent = 'Tap any game you\'d be happy to play tonight. Select as many as you like.';
+      document.getElementById('submit-btn').textContent = 'Submit My Votes';
+
+      const container = document.getElementById('approval-list');
+      container.style.display = '';
+      container.innerHTML = '';
+      session.games.forEach(game => {
+        const div = document.createElement('div');
+        div.className = 'approval-item';
+        div.dataset.id = game.id;
+        div.innerHTML = `
+          <div class="approve-check">✓</div>
+          <div class="game-info">
+            <span class="game-name">${game.name}</span>
+            <div class="game-tags">${gameTags(game)}</div>
+          </div>
+        `;
+        div.addEventListener('click', () => div.classList.toggle('approved'));
+        container.appendChild(div);
+      });
+    }
+
+    function renderWaiting(session) {
+      showOnly('waiting-view');
+      const voted = session.players.filter(p => p.hasVoted).length;
+      document.getElementById('vote-progress').textContent =
+        `${voted} of ${session.players.length} players have voted`;
+    }
+
+    // ── Drag-and-drop ──
+    function initDragDrop(list) {
+      let dragging = null;
+
+      list.addEventListener('dragstart', e => {
+        dragging = e.target.closest('li');
+        // Defer adding class so drag image renders cleanly
+        requestAnimationFrame(() => dragging.classList.add('dragging'));
+      });
+
+      list.addEventListener('dragend', () => {
+        if (dragging) dragging.classList.remove('dragging');
+        dragging = null;
+        updateRankNumbers();
+      });
+
+      list.addEventListener('dragover', e => {
+        e.preventDefault();
+        const target = e.target.closest('li');
+        if (!target || target === dragging) return;
+        const rect = target.getBoundingClientRect();
+        if (e.clientY < rect.top + rect.height / 2) {
+          list.insertBefore(dragging, target);
+        } else {
+          list.insertBefore(dragging, target.nextSibling);
+        }
+      });
+    }
+
+    function updateRankNumbers() {
+      document.querySelectorAll('#ranking-list li').forEach((li, i) => {
+        li.querySelector('.rank-num').textContent = i + 1;
+      });
+    }
+
+    // ── Submit vote ──
+    async function submitVote() {
+      const approvalItems = document.querySelectorAll('#approval-list .approval-item');
+      const ranking = approvalItems.length > 0
+        ? Array.from(document.querySelectorAll('#approval-list .approval-item.approved')).map(el => el.dataset.id)
+        : Array.from(document.querySelectorAll('#ranking-list li')).map(li => li.dataset.id);
+
+      const errEl = document.getElementById('vote-error');
+      errEl.textContent = '';
+
+      const res = await fetch(`/api/session/${code}/vote`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ playerId, ranking }),
+      });
+      const data = await res.json();
+      if (!res.ok) { errEl.textContent = data.error; return; }
+
+      hasVoted = true;
+      if (data.allVoted) {
+        clearInterval(pollInterval);
+        window.location.href = `/results.html?code=${code}`;
+      } else {
+        const session = await (await fetch(`/api/session/${code}`)).json();
+        renderWaiting(session);
+      }
+    }
+
+    // ── Entry point ──
+    function startPolling() {
+      poll();
+      pollInterval = setInterval(poll, 2000);
+    }
+
+    if (!code) {
+      window.location.href = '/';
+    } else if (!playerId) {
+      showOnly('join-view');
+    } else {
+      startPolling();
+    }
+  </script>
+</body>
+</html>

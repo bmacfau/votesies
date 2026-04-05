@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Votesies – Host</title>
+  <link rel="stylesheet" href="style.css">
+  <style>
+    .search-row { display: flex; gap: .5rem; margin-top: .75rem; }
+    .search-row input { flex: 1; }
+
+    .search-results { margin-top: .75rem; display: flex; flex-direction: column; gap: .3rem; max-height: 220px; overflow-y: auto; }
+    .search-result-item {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: .4rem .75rem; background: var(--bg); border-radius: 6px; font-size: .9rem;
+    }
+    .search-result-item .game-meta { color: var(--muted); font-size: .8rem; margin-left: .4rem; }
+    .add-btn {
+      background: var(--primary); color: white; border: none; border-radius: 5px;
+      padding: .2rem .6rem; cursor: pointer; font-size: .85rem; font-weight: 700; flex-shrink: 0;
+    }
+    .add-btn:disabled { opacity: .35; cursor: default; }
+
+    .custom-list-header { display: flex; align-items: center; justify-content: space-between; margin-top: 1.1rem; margin-bottom: .4rem; }
+    .custom-list-header h3 { font-size: .95rem; }
+
+    .custom-game-item {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: .4rem .75rem; background: var(--bg); border-radius: 6px; font-size: .9rem; margin-bottom: .3rem;
+    }
+    .remove-btn {
+      background: none; border: none; color: var(--muted); cursor: pointer; font-size: 1rem; padding: 0 .2rem;
+    }
+    .remove-btn:hover { color: var(--error); }
+
+    .search-empty { color: var(--muted); font-size: .85rem; padding: .5rem 0; }
+
+    .complexity-row { display: flex; gap: .5rem; flex-wrap: wrap; margin-top: .6rem; align-items: center; }
+    .complexity-row span { font-size: .8rem; color: var(--muted); margin-right: .2rem; }
+    .check-chip {
+      display: inline-flex; align-items: center; justify-content: center; align-self: center;
+      min-width: 68px; font-size: .82rem; line-height: 1.4; cursor: pointer;
+      padding: .25rem .55rem; border-radius: 99px; border: 1px solid var(--border); background: var(--bg);
+      user-select: none; transition: background .15s, border-color .15s; box-sizing: border-box;
+    }
+    .check-chip input { display: none; }
+    .check-chip.active { background: var(--primary); border-color: var(--primary); color: white; }
+
+    .mode-row { display: flex; gap: .5rem; margin-top: .75rem; }
+    .mode-chip {
+      display: inline-flex; align-items: center; justify-content: center;
+      min-width: 120px; gap: .35rem; font-size: .88rem; line-height: 1.4; cursor: pointer;
+      padding: .35rem .9rem; border-radius: 99px; border: 1px solid var(--border); background: var(--bg);
+      user-select: none; transition: background .15s, border-color .15s; font-weight: 500; box-sizing: border-box;
+    }
+    .mode-chip input { display: none; }
+    .mode-chip.active { background: var(--primary); border-color: var(--primary); color: white; }
+
+    .vibes-section { margin-top: 1rem; border-top: 1px solid var(--border); padding-top: .85rem; }
+    .vibes-section h3 { font-size: .9rem; margin-bottom: .5rem; }
+    .toggle-row { display: flex; align-items: center; justify-content: space-between; padding: .35rem 0; }
+    .toggle-label { font-size: .9rem; }
+    .switch { position: relative; width: 42px; height: 24px; flex-shrink: 0; }
+    .switch input { opacity: 0; width: 0; height: 0; }
+    .slider { position: absolute; cursor: pointer; inset: 0; background: #ccc; border-radius: 99px; transition: .2s; }
+    .slider:before { position: absolute; content: ''; height: 18px; width: 18px; left: 3px; bottom: 3px;
+      background: white; border-radius: 50%; transition: .2s; }
+    .switch input:checked + .slider { background: var(--primary); }
+    .switch input:checked + .slider:before { transform: translateX(18px); }
+  </style>
+</head>
+<body>
+  <header>
+    <a href="/" class="back-link">← New Session</a>
+    <h1>Votesies</h1>
+  </header>
+  <main>
+    <!-- Session code + invite link -->
+    <div class="card">
+      <div class="code-block">
+        <div>
+          <div class="code-label">Session Code</div>
+          <div id="session-code" class="big-code"></div>
+        </div>
+        <div style="flex:1">
+          <div class="code-label">Invite Link</div>
+          <div class="invite-row">
+            <input type="text" id="invite-link" readonly>
+            <button class="btn-secondary" onclick="copyLink()">Copy</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="two-col">
+      <!-- Players -->
+      <div class="card">
+        <h2>Players (<span id="player-count">1</span>)</h2>
+        <p>Share the code or link so others can join.</p>
+        <ul id="player-list" class="player-list"></ul>
+      </div>
+
+      <!-- Game list selector -->
+      <div class="card">
+        <h2>Game List</h2>
+        <p>Pick a predefined list or build your own.</p>
+        <label for="game-list-select">Choose a list</label>
+        <select id="game-list-select">
+          <option value="">— Select a list —</option>
+          <option value="custom">🔨 Build custom list...</option>
+        </select>
+
+        <!-- Voting mode -->
+        <div class="mode-row">
+          <label class="mode-chip active">
+            <input type="radio" name="voting-mode" value="ranked" checked> 📊 Ranked
+          </label>
+          <label class="mode-chip">
+            <input type="radio" name="voting-mode" value="approval"> ✅ Approval
+          </label>
+        </div>
+
+        <!-- Predefined list preview -->
+        <div id="list-preview" class="list-preview"></div>
+
+        <!-- Custom list builder -->
+        <div id="custom-builder" style="display:none">
+          <div style="display:flex; gap:.5rem; margin-top:.75rem; flex-wrap:wrap">
+            <div style="flex:1; min-width:120px">
+              <label for="player-filter" style="margin-top:0">Players</label>
+              <input type="number" id="player-filter" min="1" max="20" placeholder="Any" style="padding:.55rem .7rem">
+            </div>
+            <div style="flex:3; min-width:160px">
+              <label for="bgg-search" style="margin-top:0">Search games</label>
+              <input type="text" id="bgg-search" placeholder="Type to search..." autocomplete="off">
+            </div>
+          </div>
+          <div class="complexity-row">
+            <span>Complexity:</span>
+            <label class="check-chip active"><input type="checkbox" class="complexity-filter" value="light" checked> Light</label>
+            <label class="check-chip active"><input type="checkbox" class="complexity-filter" value="medium" checked> Medium</label>
+            <label class="check-chip active"><input type="checkbox" class="complexity-filter" value="heavy" checked> Heavy</label>
+            <label class="check-chip active"><input type="checkbox" class="complexity-filter" value="expert" checked> Expert</label>
+          </div>
+          <div id="search-results"></div>
+
+          <div class="custom-list-header">
+            <h3>Your list (<span id="custom-count">0</span> games)</h3>
+          </div>
+          <div id="custom-list"></div>
+          <p id="custom-hint" class="hint">Add at least 2 games to start.</p>
+        </div>
+
+        <!-- Vibes -->
+        <div class="vibes-section">
+          <h3>Extras</h3>
+          <div class="toggle-row">
+            <span class="toggle-label">🔥 Sexy Time</span>
+            <label class="switch"><input type="checkbox" id="vibe-sexy-time"><span class="slider"></span></label>
+          </div>
+          <div class="toggle-row">
+            <span class="toggle-label">🗳️ More Votesies</span>
+            <label class="switch"><input type="checkbox" id="vibe-more-votesies"><span class="slider"></span></label>
+          </div>
+        </div>
+
+        <button id="start-btn" class="btn-primary" disabled onclick="startVoting()">
+          Start Voting
+        </button>
+        <p id="start-error" class="error"></p>
+      </div>
+    </div>
+  </main>
+
+  <script>
+    const params = new URLSearchParams(window.location.search);
+    const code = params.get('code');
+    const playerId = sessionStorage.getItem(`playerId_${code}`);
+    let pollInterval;
+    let customGames = []; // {id, name, year}
+
+    if (!code || !playerId) window.location.href = '/';
+
+    document.getElementById('session-code').textContent = code;
+    const inviteUrl = `${window.location.origin}/?join=${code}`;
+    document.getElementById('invite-link').value = inviteUrl;
+
+    function copyLink() {
+      navigator.clipboard.writeText(inviteUrl).then(() => {
+        const btn = document.querySelector('.invite-row button');
+        btn.textContent = 'Copied!';
+        setTimeout(() => { btn.textContent = 'Copy'; }, 2000);
+      });
+    }
+
+    // ── Game list dropdown ──
+    async function loadGameLists() {
+      const res = await fetch('/api/gamelists');
+      const lists = await res.json();
+      const select = document.getElementById('game-list-select');
+      lists.forEach(name => {
+        const opt = document.createElement('option');
+        opt.value = name;
+        opt.textContent = name;
+        select.appendChild(opt);
+      });
+    }
+
+    document.getElementById('game-list-select').addEventListener('change', async function () {
+      const selected = this.value;
+      const preview = document.getElementById('list-preview');
+      const builder = document.getElementById('custom-builder');
+
+      preview.style.display = 'none';
+      builder.style.display = 'none';
+      document.getElementById('start-btn').disabled = true;
+
+      if (!selected) return;
+
+      if (selected === 'custom') {
+        builder.style.display = 'block';
+        updateStartButton();
+        return;
+      }
+
+      preview.style.display = 'block';
+      const res = await fetch(`/api/gamelists/${encodeURIComponent(selected)}`);
+      const games = await res.json();
+      preview.innerHTML = '<ul>' + games.map(g => `<li>${g.name}</li>`).join('') + '</ul>';
+      document.getElementById('start-btn').disabled = false;
+    });
+
+    // ── Search ──
+    let searchDebounce;
+    function scheduleSearch() {
+      clearTimeout(searchDebounce);
+      searchDebounce = setTimeout(runSearch, 300);
+    }
+
+    document.getElementById('bgg-search').addEventListener('input', scheduleSearch);
+    document.getElementById('player-filter').addEventListener('input', scheduleSearch);
+
+    // Voting mode chip toggles
+    document.querySelectorAll('[name="voting-mode"]').forEach(radio => {
+      radio.addEventListener('change', function () {
+        document.querySelectorAll('.mode-chip').forEach(c => c.classList.remove('active'));
+        this.closest('.mode-chip').classList.add('active');
+      });
+    });
+
+    // Complexity chip toggles
+    document.querySelectorAll('.complexity-filter').forEach(cb => {
+      cb.addEventListener('change', function () {
+        this.closest('.check-chip').classList.toggle('active', this.checked);
+        scheduleSearch();
+      });
+    });
+
+    function complexityLabel(c) {
+      if (c < 2.0) return 'Light';
+      if (c < 3.0) return 'Medium';
+      if (c < 4.0) return 'Heavy';
+      return 'Expert';
+    }
+
+    async function runSearch() {
+      const q = document.getElementById('bgg-search').value.trim();
+      const players = document.getElementById('player-filter').value.trim();
+      if (!q && !players) { document.getElementById('search-results').innerHTML = ''; return; }
+
+      const resultsEl = document.getElementById('search-results');
+      resultsEl.innerHTML = '<p class="search-empty">Searching...</p>';
+
+      const selected = Array.from(document.querySelectorAll('.complexity-filter:checked')).map(cb => cb.value);
+
+      const params = new URLSearchParams();
+      if (q) params.set('q', q);
+      if (players) params.set('players', players);
+
+      const res = await fetch(`/api/bgg/search?${params}`);
+      let games = await res.json();
+
+      if (!res.ok || games.length === 0) {
+        resultsEl.innerHTML = '<p class="search-empty">No results found.</p>';
+        return;
+      }
+
+      if (selected.length < 4) {
+        games = games.filter(g => selected.includes(complexityLabel(g.complexity || 1).toLowerCase()));
+        if (games.length === 0) {
+          resultsEl.innerHTML = '<p class="search-empty">No results match the selected complexity.</p>';
+          return;
+        }
+      }
+
+      resultsEl.className = 'search-results';
+      resultsEl.innerHTML = '';
+      games.forEach(game => {
+        const alreadyAdded = customGames.some(g => g.id === game.id);
+        const div = document.createElement('div');
+        div.className = 'search-result-item';
+        div.dataset.id = game.id;
+        div.innerHTML = `
+          <span>
+            ${game.name}
+            <span class="game-meta">${game.genre ? `${game.genre} · ` : ''}${game.length ? `⏱ ${game.length} · ` : ''}${game.minPlayers === game.maxPlayers ? `${game.minPlayers}p` : `${game.minPlayers}–${game.maxPlayers}p`} · ⭐ ${game.rating}${game.complexity ? ` · 🧠 ${complexityLabel(game.complexity)}` : ''}</span>
+          </span>
+          <button class="add-btn" data-id="${game.id}" data-name="${game.name}" data-year="${game.year || ''}"
+            ${alreadyAdded ? 'disabled' : ''}>
+            ${alreadyAdded ? '✓' : '+'}
+          </button>
+        `;
+        resultsEl.appendChild(div);
+      });
+    }
+
+    document.getElementById('search-results').addEventListener('click', e => {
+      const btn = e.target.closest('.add-btn');
+      if (!btn || btn.disabled) return;
+      addGame(btn.dataset.id, btn.dataset.name, btn.dataset.year || null);
+    });
+
+    // ── Custom list management ──
+    function addGame(id, name, year) {
+      if (customGames.some(g => g.id === id)) return;
+      customGames.push({ id, name, year });
+      renderCustomList();
+      updateStartButton();
+
+      // Disable the + button in search results
+      const btn = document.querySelector(`.search-result-item[data-id="${id}"] .add-btn`);
+      if (btn) { btn.disabled = true; btn.textContent = '✓'; }
+    }
+
+    function removeGame(id) {
+      customGames = customGames.filter(g => g.id !== id);
+      renderCustomList();
+      updateStartButton();
+
+      // Re-enable the + button in search results if visible
+      const btn = document.querySelector(`.search-result-item[data-id="${id}"] .add-btn`);
+      if (btn) { btn.disabled = false; btn.textContent = '+'; }
+    }
+
+    function renderCustomList() {
+      const el = document.getElementById('custom-list');
+      document.getElementById('custom-count').textContent = customGames.length;
+      el.innerHTML = customGames.map(g => `
+        <div class="custom-game-item">
+          <span>${g.name}${g.year ? ` <span style="color:var(--muted);font-size:.8rem">(${g.year})</span>` : ''}</span>
+          <button class="remove-btn" onclick="removeGame('${g.id}')" title="Remove">✕</button>
+        </div>
+      `).join('');
+    }
+
+    function updateStartButton() {
+      const selected = document.getElementById('game-list-select').value;
+      const btn = document.getElementById('start-btn');
+      if (selected === 'custom') {
+        btn.disabled = customGames.length < 2;
+        document.getElementById('custom-hint').textContent =
+          customGames.length < 2 ? 'Add at least 2 games to start.' : '';
+      } else {
+        btn.disabled = !selected;
+      }
+    }
+
+    // ── Polling ──
+    async function poll() {
+      const res = await fetch(`/api/session/${code}`);
+      if (!res.ok) return;
+      const session = await res.json();
+
+      document.getElementById('player-count').textContent = session.players.length;
+      const ul = document.getElementById('player-list');
+      ul.innerHTML = session.players.map(p =>
+        `<li class="${p.isHost ? 'host' : ''}">${p.isHost ? '👑 ' : ''}${p.name}</li>`
+      ).join('');
+
+      if (session.status === 'voting' || session.status === 'results') {
+        clearInterval(pollInterval);
+        window.location.href = `/vote.html?code=${code}`;
+      }
+    }
+
+    // ── Start voting ──
+    async function startVoting() {
+      const gameListName = document.getElementById('game-list-select').value;
+      const errEl = document.getElementById('start-error');
+      errEl.textContent = '';
+
+      const sessionRes = await fetch(`/api/session/${code}`);
+      const session = await sessionRes.json();
+      if (session.players.length < 2) {
+        errEl.textContent = 'Wait for at least one other player to join first.';
+        return;
+      }
+
+      const vibes = [];
+      if (document.getElementById('vibe-sexy-time').checked) vibes.push('sexy-time');
+      if (document.getElementById('vibe-more-votesies').checked) vibes.push('more-votesies');
+
+      const votingMode = document.querySelector('[name="voting-mode"]:checked').value;
+
+      const body = gameListName === 'custom'
+        ? { hostId: playerId, customGames: customGames.map(({ id, name }) => ({ id, name })), vibes, votingMode }
+        : { hostId: playerId, gameListName, vibes, votingMode };
+
+      const res = await fetch(`/api/session/${code}/start`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (!res.ok) { errEl.textContent = data.error; return; }
+
+      clearInterval(pollInterval);
+      window.location.href = `/vote.html?code=${code}`;
+    }
+
+    loadGameLists();
+    poll();
+    pollInterval = setInterval(poll, 2000);
+  </script>
+</body>
+</html>

@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Votesies</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <h1>Votesies</h1>
+    <p>Vote on what board game to play tonight</p>
+  </header>
+  <main class="two-col">
+    <div class="card">
+      <h2>Create a Session</h2>
+      <p>Start a new voting session as the host. You'll pick the game list.</p>
+      <form id="create-form">
+        <label for="host-name">Your name</label>
+        <input type="text" id="host-name" placeholder="Enter your name" required maxlength="30" autocomplete="off">
+        <button type="submit" class="btn-primary">Create Session</button>
+      </form>
+      <p id="create-error" class="error"></p>
+    </div>
+
+    <div class="card">
+      <h2>Join a Session</h2>
+      <p>Enter the 4-letter code shared by the host.</p>
+      <form id="join-form">
+        <label for="join-code">Session code</label>
+        <input type="text" id="join-code" placeholder="e.g. A1B2" required maxlength="4" autocomplete="off"
+               style="text-transform:uppercase; letter-spacing:.15em; font-family:monospace; font-size:1.3rem">
+        <label for="join-name">Your name</label>
+        <input type="text" id="join-name" placeholder="Enter your name" required maxlength="30" autocomplete="off">
+        <button type="submit" class="btn-primary">Join Session</button>
+      </form>
+      <p id="join-error" class="error"></p>
+    </div>
+  </main>
+
+  <script>
+    // Pre-fill join code if arriving via invite link (?join=CODE)
+    const params = new URLSearchParams(window.location.search);
+    const inviteCode = params.get('join');
+    if (inviteCode) {
+      document.getElementById('join-code').value = inviteCode.toUpperCase();
+      document.getElementById('join-name').focus();
+    }
+
+    document.getElementById('create-form').addEventListener('submit', async e => {
+      e.preventDefault();
+      const name = document.getElementById('host-name').value.trim();
+      const errEl = document.getElementById('create-error');
+      errEl.textContent = '';
+      try {
+        const res = await fetch('/api/session/create', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ hostName: name }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error);
+        sessionStorage.setItem(`playerId_${data.code}`, data.hostId);
+        window.location.href = `/host.html?code=${data.code}`;
+      } catch (err) {
+        errEl.textContent = err.message;
+      }
+    });
+
+    document.getElementById('join-form').addEventListener('submit', async e => {
+      e.preventDefault();
+      const code = document.getElementById('join-code').value.trim().toUpperCase();
+      const name = document.getElementById('join-name').value.trim();
+      const errEl = document.getElementById('join-error');
+      errEl.textContent = '';
+      try {
+        const res = await fetch(`/api/session/${code}/join`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name }),
+        });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error);
+        sessionStorage.setItem(`playerId_${code}`, data.playerId);
+        window.location.href = `/vote.html?code=${code}`;
+      } catch (err) {
+        errEl.textContent = err.message;
+      }
+    });
+  </script>
+</body>
+</html>

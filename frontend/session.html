@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Session Voting</title>
+</head>
+<body>
+  <h1>Session: <span id="session-id"></span></h1>
+  <p>Invite Link: <a id="invite-link" target="_blank"></a></p>
+
+  <div id="vote-section" style="display:none;">
+    <h2>Vote for Games</h2>
+    <div id="games-list"></div>
+    <button onclick="submitVote()">Submit Vote</button>
+    <button onclick="checkResults()">Check Results</button>
+  </div>
+
+  <script>
+    const urlParams = new URLSearchParams(window.location.search);
+    const sessionId = urlParams.get('sessionId');
+    const inviteLink = urlParams.get('invite-link');
+
+    document.getElementById('session-id').textContent = sessionId;
+    document.getElementById('invite-link').textContent = inviteLink;
+
+    async function loadGames() {
+      const response = await fetch(`/api/session/${sessionId}`);
+      const data = await response.json();
+      const gamesDiv = document.getElementById('games-list');
+      gamesDiv.innerHTML = '';
+      data.games.forEach(game => {
+        gamesDiv.innerHTML += `
+          <div>
+            <strong>${game.name}</strong>
+            <button onclick="vote(${data.games.indexOf(game)}, '${sessionId}')">Vote</button>
+          </div>
+        `;
+      });
+    }
+
+    async function vote(gameIndex, sessionId) {
+      const score = prompt('Enter your vote (1-5):');
+      await fetch('/api/vote', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId, gameId: gameIndex, score: parseInt(score) })
+      });
+      loadGames();
+    }
+
+    async function checkResults() {
+      const res = await fetch(`/api/check-results?sessionId=${sessionId}`);
+      const data = await res.json();
+      if (data.allVoted) {
+        alert('All votes submitted! Showing results...');
+        showResults(data.sessionId, data.games);
+      } else {
+        alert('Not all players have voted yet.');
+      }
+    }
+
+    function showResults(sessionId, games) {
+      const resultsDiv = document.createElement('div');
+      resultsDiv.innerHTML = '<h2>Results</h2>';
+      games.forEach(game => {
+        const score = (window.sessionData.votes[game.id] || 0);
+        resultsDiv.innerHTML += `<p>${game.name}: ${score} votes</p>`;
+      });
+      document.body.appendChild(resultsDiv);
+    }
+
+    loadGames();
+  </script>
+</body>
+</html>
